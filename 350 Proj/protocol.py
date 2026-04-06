@@ -32,6 +32,7 @@ FIELD_MESSAGE = "MESSAGE"
 FIELD_COLOR = "COLOR"
 FIELD_HEALTH = "HEALTH"
 FIELD_PLAYER_ID = "PLAYER_ID"
+FIELD_STATUS = "STATUS"
 
 # Error codes
 ERROR_PLAYER_NOT_FOUND = "PLAYER_NOT_FOUND"
@@ -57,13 +58,13 @@ STATUS_FAIL = "FAIL"
 STATUS_INVALID = "INVALID"
 
 # MESSAGE FORMATS (examples of what each message contains)
-# JOIN: {"type": "join", "username": "player_name"}
-# PLAYER_LIST: {"type": "player_list", "players": ["p1", "p2", ...]}
-# SELECT_OPPONENT: {"type": "select_opponent", "opponent": "player_name"}
-# SNAKE_CONFIG: {"type": "snake_config", "color": "red", "game_id": "12345"}
-# READY: {"type": "ready", "game_id": "12345"}
-# MOVE: {"type": "move", "game_id": "12345", "direction": "UP"}
-# GAME_STATE: {"type": "game_state", "board": [...], "player1": {"health": 100, "color": "red"}, "player2": {"health": 100, "color": "blue"}}
-# GAME_OVER: {"type": "game_over", "winner": "player_name", "score": {...}}
-# DISCONNECT: {"type": "disconnect", "player": "player_name"}
-# ERROR: {"type": "error", "message": "error description"}
+# JOIN: {"TYPE": "JOIN", "USERNAME": "player_name"}
+# PLAYER_LIST: {"TYPE": "PLAYER_LIST", "PLAYERS": ["p1", "p2", ...]}
+# SELECT_OPPONENT: {"TYPE": "SELECT_OPPONENT", "OPPONENT": "player_name"}
+# SNAKE_CONFIG: {"TYPE": "SNAKE_CONFIG", "COLOR": "red", "GAME_ID": "12345"}
+# READY: {"TYPE": "READY", "GAME_ID": "12345"}
+# MOVE: {"TYPE": "MOVE", "GAME_ID": "12345", "DIRECTION": "UP"}
+# GAME_STATE: {"TYPE": "GAME_STATE", "BOARD": [...], "PLAYER1": {"HEALTH": 100, "COLOR": "red"}, "PLAYER2": {"HEALTH": 100, "COLOR": "blue"}}
+# GAME_OVER: {"TYPE": "GAME_OVER", "WINNER": "player_name", "SCORE": {...}}
+# DISCONNECT: {"TYPE": "DISCONNECT", "PLAYER": "player_name"}
+# ERROR: {"TYPE": "ERROR", "MESSAGE": "error description", "STATUS": "FAIL"}
