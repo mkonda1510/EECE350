@@ -4,6 +4,7 @@
 JOIN = "JOIN"
 PLAYER_LIST = "PLAYER_LIST"
 SELECT_OPPONENT = "SELECT_OPPONENT"
+SNAKE_CONFIG = "SNAKE_CONFIG"
 MOVE = "MOVE"
 GAME_STATE = "GAME_STATE"
 GAME_OVER = "GAME_OVER"
@@ -28,6 +29,9 @@ FIELD_BOARD = "BOARD"
 FIELD_SCORE = "SCORE"
 FIELD_WINNER = "WINNER"
 FIELD_MESSAGE = "MESSAGE"
+FIELD_COLOR = "COLOR"
+FIELD_HEALTH = "HEALTH"
+FIELD_PLAYER_ID = "PLAYER_ID"
 
 # Error codes
 ERROR_PLAYER_NOT_FOUND = "PLAYER_NOT_FOUND"
@@ -56,9 +60,10 @@ STATUS_INVALID = "INVALID"
 # JOIN: {"type": "join", "username": "player_name"}
 # PLAYER_LIST: {"type": "player_list", "players": ["p1", "p2", ...]}
 # SELECT_OPPONENT: {"type": "select_opponent", "opponent": "player_name"}
+# SNAKE_CONFIG: {"type": "snake_config", "color": "red", "game_id": "12345"}
 # READY: {"type": "ready", "game_id": "12345"}
 # MOVE: {"type": "move", "game_id": "12345", "direction": "UP"}
-# GAME_STATE: {"type": "game_state", "board": [...], "score": {...}}
-# GAME_OVER: {"type": "game_over", "winner": "player_name"}
+# GAME_STATE: {"type": "game_state", "board": [...], "player1": {"health": 100, "color": "red"}, "player2": {"health": 100, "color": "blue"}}
+# GAME_OVER: {"type": "game_over", "winner": "player_name", "score": {...}}
 # DISCONNECT: {"type": "disconnect", "player": "player_name"}
 # ERROR: {"type": "error", "message": "error description"}
