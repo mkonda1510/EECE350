@@ -1,56 +1,62 @@
-import socket #network communication
-import threading #handling multiple clients concurrently
-import json #for encoding and decoding messages
-from protocol import * #importing protocol constants
+import socket
+import threading
+import json
+from protocol import *
 
 SERVER_IP = socket.gethostbyname(socket.gethostname())
 SERVER_PORT = 8000
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # creating stream socket
-server.bind((SERVER_IP, SERVER_PORT))  # binding the server
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((SERVER_IP, SERVER_PORT))
 
-players = {}  # Track all connected players
-games = {}    # Track active games between two players
-lock = threading.Lock()  # Prevent conflicts when multiple threads access shared data
+players = {}
+games = {}
+lock = threading.Lock()
 
-server.listen() # Start listening for incoming connections
+server.listen()
 
 
 def send_message(client_socket, message):
-    json_data = json.dumps(message) # Convert dictionary to JSON string
-    client_socket.sendall(json_data.encode('utf-8') + b'\n') # Send message with newline as delimiter
+    json_data = json.dumps(message)
+    client_socket.sendall(json_data.encode('utf-8') + b'\n')
+
 
 def receive_message(client_socket):
     data = b''
-    while b'\n' not in data: # Read until \n is found
-        chunk = client_socket.recv(1024) # Receive data in chunks
+    while b'\n' not in data:
+        chunk = client_socket.recv(1024)
         if not chunk:
-            return None # close connection (client disconnected)
+            return None
         data += chunk
-    return json.loads(data.decode('utf-8').strip()) # Convert JSON string back to dictionary
+    return json.loads(data.decode('utf-8').strip())
+
 
 def send_player_list(requesting_player):
-    #send list of online players to the requesting player
-    with lock: #Use lock to read players dictionary safely
-        available_players = [name for name in players.keys() if name != requesting_player and players[name]['status'] == PLAYER_STATUS_ONLINE]
+    with lock:
+        available_players = [
+            name for name in players.keys()
+            if name != requesting_player and players[name]['status'] == PLAYER_STATUS_ONLINE
+        ]
 
-        message = {FIELD_TYPE: PLAYER_LIST, FIELD_PLAYERS: available_players}
+        message = {
+            FIELD_TYPE: PLAYER_LIST,
+            FIELD_PLAYERS: available_players,
+            FIELD_STATUS: STATUS_OK
+        }
 
-    #send message to the requesting player
     send_message(players[requesting_player]['socket'], message)
 
-def handle_client(client_socket,address):
-    #handle 1 client connection from join to disconnect
-    USERNAME = None
+
+def handle_client(client_socket, address):
+    username = None
     try:
-        # First message should be JOIN with username
         message = receive_message(client_socket)
 
         if message and message.get(FIELD_TYPE) == JOIN:
             username = message.get(FIELD_USERNAME)
-            # Check if username used:
+
             with lock:
-                if username in players:  # Send error if username already taken
+                if username in players:
                     send_message(client_socket, {
                         FIELD_TYPE: ERROR,
                         FIELD_MESSAGE: "Username already taken",
@@ -59,41 +65,37 @@ def handle_client(client_socket,address):
                     client_socket.close()
                     return
 
-                # Add new player to server
                 players[username] = {
                     "socket": client_socket,
                     "status": PLAYER_STATUS_ONLINE,
                     "opponent": None,
                     "snake_config": None,
-                    "health": 100
+                    "health": 100,
+                    "game_id": None
                 }
 
-            # Confirm join
             send_message(client_socket, {
                 FIELD_TYPE: JOIN,
                 FIELD_STATUS: STATUS_OK,
                 FIELD_USERNAME: username
             })
+
             print(f"Player {username} joined from {address}")
-
-            send_player_list(username)  # Send list of online players
-
-            handle_messages(client_socket, username)  # Handle client's messages
+            send_player_list(username)
+            handle_messages(client_socket, username)
 
     except Exception as e:
         print(f"Error handling client {address}: {e}")
 
     finally:
-        # Close connection when client leaves
         if username:
             with lock:
-                players.pop(username, None)  # Remove username from dictionary
+                players.pop(username, None)
             print(f"Player {username} disconnected")
-        client_socket.close()  # Close socket connection
+        client_socket.close()
 
 
 def handle_messages(client_socket, username):
-    """Handle incoming messages from a client"""
     while True:
         try:
             message = receive_message(client_socket)
@@ -119,43 +121,86 @@ def handle_messages(client_socket, username):
             break
 
 
-# Stub handler functions (replace with real implementations later)
 def handle_select_opponent(username, message):
-    """Handle opponent selection - TODO: implement matchmaking"""
-    print(f"{username} wants to select opponent: {message.get(FIELD_OPPONENT)}")
-    #  Add matchmaking logic
+    opponent = message.get(FIELD_OPPONENT)
+
+    with lock:
+        if opponent not in players:
+            send_message(players[username]['socket'], {
+                FIELD_TYPE: ERROR,
+                FIELD_MESSAGE: "Opponent not found",
+                FIELD_STATUS: STATUS_FAIL
+            })
+            return
+
+        players[username]['opponent'] = opponent
+        players[opponent]['opponent'] = username
+
+    send_message(players[username]['socket'], {
+        FIELD_TYPE: SELECT_OPPONENT,
+        FIELD_STATUS: STATUS_OK,
+        FIELD_OPPONENT: opponent
+    })
+
+    send_message(players[opponent]['socket'], {
+        FIELD_TYPE: SELECT_OPPONENT,
+        FIELD_STATUS: STATUS_OK,
+        FIELD_OPPONENT: username
+    })
+
 
 def handle_snake_config(username, message):
-    """Handle snake configuration - TODO: implement"""
     print(f"{username} sent snake config: {message}")
-    #  Store snake config
+    players[username]['snake_config'] = message.get(FIELD_COLOR)
+
 
 def handle_ready(username, message):
-    """Handle ready status - TODO: implement"""
-    print(f"{username} is ready")
-    #  Start game when both ready
+    opponent = players[username]['opponent']
+
+    if not opponent:
+        return
+
+    players[username]['status'] = PLAYER_STATUS_WAITING
+
+    if players[opponent]['status'] == PLAYER_STATUS_WAITING:
+        game_id = f"{username}_vs_{opponent}"
+
+        players[username]['game_id'] = game_id
+        players[opponent]['game_id'] = game_id
+
+        send_message(players[username]['socket'], {
+            FIELD_TYPE: GAME_STATE,
+            FIELD_STATUS: STATUS_OK,
+            FIELD_GAME_ID: game_id
+        })
+
+        send_message(players[opponent]['socket'], {
+            FIELD_TYPE: GAME_STATE,
+            FIELD_STATUS: STATUS_OK,
+            FIELD_GAME_ID: game_id
+        })
+
 
 def handle_move(username, message):
-    """Handle move - TODO: implement game logic"""
-    print(f"{username} moved: {message.get(FIELD_DIRECTION)}")
-    #  Update game state
+    direction = message.get(FIELD_DIRECTION)
+    game_id = message.get(FIELD_GAME_ID)
+
+    print(f"{username} moved: {direction} in game {game_id}")
+
 
 def handle_disconnect(username):
-    """Handle disconnection - TODO: implement"""
     print(f"{username} disconnected")
-    #  Notify opponent
 
 
-#MAIN LOOP
+print(f"Server started on {SERVER_IP}:{SERVER_PORT}")
 
 try:
-    print(f"Server started on {SERVER_IP}:{SERVER_PORT}")
     while True:
         client_socket, address = server.accept()
         print(f"New connection from {address}")
-        client_thread = threading.Thread(target=handle_client, args=(client_socket, address))
-        client_thread.daemon = True
-        client_thread.start()
+        thread = threading.Thread(target=handle_client, args=(client_socket, address))
+        thread.daemon = True
+        thread.start()
 except KeyboardInterrupt:
     print("Server shutting down...")
 finally:
