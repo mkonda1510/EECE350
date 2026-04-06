@@ -181,7 +181,7 @@ def handle_ready(username, message):
         })
 
 
-def handle_move(username, message):
+def handle_move(username, message) :
     direction = message.get(FIELD_DIRECTION)
     game_id = message.get(FIELD_GAME_ID)
 
