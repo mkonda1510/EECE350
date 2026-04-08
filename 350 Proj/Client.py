@@ -12,16 +12,14 @@ pygame.init()
 DEFAULT_SERVER_IP = socket.gethostbyname(socket.gethostname())
 DEFAULT_SERVER_PORT = 8000
 
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_WIDTH = 1000
+SCREEN_HEIGHT = 800
 
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)
-
-CELL_SIZE = 20
 
 
 class Client:
@@ -39,6 +37,18 @@ class Client:
         self.game_id = None
         self.input_text = ""
         self.input_active = True
+
+        # Default to WASD so the player can start immediately.
+        self.controls = {
+            UP: pygame.K_w,
+            DOWN: pygame.K_s,
+            LEFT: pygame.K_a,
+            RIGHT: pygame.K_d,
+        }
+        self.control_order = [UP, DOWN, LEFT, RIGHT]
+        self.control_index = 0
+        self.controls_locked = True
+        self.control_mode = "WASD"
 
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Python Arena")
@@ -108,6 +118,18 @@ class Client:
             if message.get(FIELD_STATUS) == STATUS_OK:
                 self.opponent = message.get(FIELD_OPPONENT)
                 self.current_screen = "snake_config"
+
+                # Reset to default WASD at the start of each match.
+                self.controls = {
+                    UP: pygame.K_w,
+                    DOWN: pygame.K_s,
+                    LEFT: pygame.K_a,
+                    RIGHT: pygame.K_d,
+                }
+                self.control_index = 0
+                self.controls_locked = True
+                self.control_mode = "WASD"
+
                 print(f"Selected opponent: {self.opponent}")
             else:
                 print("Failed to select opponent")
@@ -118,6 +140,7 @@ class Client:
                 self.opponent_color = self.parse_color(opponent_color)
 
         elif msg_type == GAME_STATE:
+            # The server owns the board; the client only stores and draws it.
             self.game_state = message
             self.game_id = message.get(FIELD_GAME_ID)
             self.current_screen = "game"
@@ -140,6 +163,35 @@ class Client:
             "black": BLACK,
         }
         return color_map.get(color_str.lower(), RED)
+
+    def key_name(self, key_code):
+        return pygame.key.name(key_code).upper()
+
+    def set_wasd_controls(self):
+        self.controls = {
+            UP: pygame.K_w,
+            DOWN: pygame.K_s,
+            LEFT: pygame.K_a,
+            RIGHT: pygame.K_d,
+        }
+        self.controls_locked = True
+        self.control_mode = "WASD"
+
+    def set_arrow_controls(self):
+        self.controls = {
+            UP: pygame.K_UP,
+            DOWN: pygame.K_DOWN,
+            LEFT: pygame.K_LEFT,
+            RIGHT: pygame.K_RIGHT,
+        }
+        self.controls_locked = True
+        self.control_mode = "ARROWS"
+
+    def start_custom_controls(self):
+        self.controls = {}
+        self.control_index = 0
+        self.controls_locked = False
+        self.control_mode = "CUSTOM"
 
     def join_server(self, username):
         self.username = username
@@ -185,6 +237,48 @@ class Client:
             self.input_text = self.input_text[:-1]
         elif len(self.input_text) < 20:
             self.input_text += event.unicode
+
+    def handle_control_setup(self, event):
+        if event.type != pygame.KEYDOWN:
+            return
+
+        # Let the player switch modes at any time on the setup screen.
+        if event.key == pygame.K_1:
+            self.set_wasd_controls()
+            return
+        elif event.key == pygame.K_2:
+            self.set_arrow_controls()
+            return
+        elif event.key == pygame.K_3:
+            self.start_custom_controls()
+            return
+
+        # Preset modes only need SPACE to confirm.
+        if self.control_mode in ("WASD", "ARROWS"):
+            if event.key == pygame.K_SPACE:
+                self.send_snake_config("red")
+                self.send_ready()
+            return
+
+        # Custom mode collects 4 keys, then SPACE confirms.
+        if self.control_mode == "CUSTOM":
+            if self.controls_locked:
+                if event.key == pygame.K_SPACE:
+                    self.send_snake_config("red")
+                    self.send_ready()
+                return
+
+            current_direction = self.control_order[self.control_index]
+
+            # Avoid duplicate keys for different directions.
+            if event.key in self.controls.values():
+                return
+
+            self.controls[current_direction] = event.key
+            self.control_index += 1
+
+            if self.control_index >= len(self.control_order):
+                self.controls_locked = True
 
     def draw_login_screen(self):
         self.screen.fill(BLACK)
@@ -236,26 +330,110 @@ class Client:
         opponent_text = self.font.render(f"Opponent: {self.opponent}", True, WHITE)
         self.screen.blit(opponent_text, (50, 110))
 
-        ready_text = self.font.render("Press SPACE to ready up with red snake", True, GREEN)
-        self.screen.blit(ready_text, (50, 170))
+        mode_title = self.font.render("Choose controls: 1=WASD  2=Arrow Keys  3=Custom", True, WHITE)
+        self.screen.blit(mode_title, (50, 170))
+
+        mode_text = self.font.render(f"Current Mode: {self.control_mode}", True, GREEN)
+        self.screen.blit(mode_text, (50, 220))
+
+        y = 280
+        for direction in self.control_order:
+            key_label = self.key_name(self.controls[direction]) if direction in self.controls else "-"
+            line = self.font.render(f"{direction}: {key_label}", True, WHITE)
+            self.screen.blit(line, (50, y))
+            y += 45
+
+        if self.control_mode == "CUSTOM" and not self.controls_locked:
+            current_direction = self.control_order[self.control_index]
+            prompt = self.font.render(f"Press a key for {current_direction}", True, GREEN)
+            self.screen.blit(prompt, (50, y + 20))
+        else:
+            ready_text = self.font.render("Press SPACE to ready up", True, GREEN)
+            self.screen.blit(ready_text, (50, y + 20))
 
     def draw_game_screen(self):
         self.screen.fill(BLACK)
 
-        for x in range(0, SCREEN_WIDTH, CELL_SIZE):
-            pygame.draw.line(self.screen, WHITE, (x, 0), (x, SCREEN_HEIGHT))
-        for y in range(0, SCREEN_HEIGHT, CELL_SIZE):
-            pygame.draw.line(self.screen, WHITE, (0, y), (SCREEN_WIDTH, y))
+        if not self.game_state:
+            return
 
-        status_text = self.font.render("Game in progress...", True, WHITE)
-        self.screen.blit(status_text, (50, 50))
+        board = self.game_state.get(FIELD_BOARD, {"width": 20, "height": 20})
+        food = self.game_state.get(FIELD_FOOD, [])
+        obstacles = self.game_state.get(FIELD_OBSTACLES, [])
+        players_data = self.game_state.get(FIELD_PLAYERS_DATA, {})
+        time_left = self.game_state.get(FIELD_TIME_LEFT, 0)
+        spectators = self.game_state.get(FIELD_SPECTATORS, 0)
 
-        if self.opponent:
-            opponent_text = self.font.render(f"vs {self.opponent}", True, WHITE)
-            self.screen.blit(opponent_text, (50, 100))
+        top_bar_height = 70
+        offset_x = 0
+        offset_y = top_bar_height
 
-        move_text = self.font.render("Use WASD or Arrow keys to move", True, GREEN)
-        self.screen.blit(move_text, (50, SCREEN_HEIGHT - 50))
+        # Scale the board so it fills almost the whole window.
+        cell_width = SCREEN_WIDTH / board["width"]
+        cell_height = (SCREEN_HEIGHT - top_bar_height) / board["height"]
+
+        usernames = list(players_data.keys())
+
+        if len(usernames) > 0:
+            health1 = players_data[usernames[0]].get(FIELD_HEALTH, 0)
+            text1 = self.font.render(f"{usernames[0]}: {health1}", True, WHITE)
+            self.screen.blit(text1, (20, 20))
+
+        if len(usernames) > 1:
+            health2 = players_data[usernames[1]].get(FIELD_HEALTH, 0)
+            text2 = self.font.render(f"{usernames[1]}: {health2}", True, WHITE)
+            self.screen.blit(text2, (220, 20))
+
+        timer_text = self.font.render(f"Time Left: {time_left}", True, WHITE)
+        timer_rect = timer_text.get_rect(center=(SCREEN_WIDTH // 2, 30))
+        self.screen.blit(timer_text, timer_rect)
+
+        spectator_text = self.font.render(f"Spectators: {spectators}", True, WHITE)
+        spectator_rect = spectator_text.get_rect(topright=(SCREEN_WIDTH - 20, 15))
+        self.screen.blit(spectator_text, spectator_rect)
+
+        # Draw the grid.
+        for x in range(board["width"]):
+            for y in range(board["height"]):
+                rect = pygame.Rect(
+                    int(offset_x + x * cell_width),
+                    int(offset_y + y * cell_height),
+                    int(cell_width),
+                    int(cell_height),
+                )
+                pygame.draw.rect(self.screen, WHITE, rect, 1)
+
+        # Draw obstacles.
+        for x, y in obstacles:
+            rect = pygame.Rect(
+                int(offset_x + x * cell_width),
+                int(offset_y + y * cell_height),
+                int(cell_width),
+                int(cell_height),
+            )
+            pygame.draw.rect(self.screen, WHITE, rect)
+
+        # Draw food.
+        for x, y in food:
+            rect = pygame.Rect(
+                int(offset_x + x * cell_width + cell_width * 0.2),
+                int(offset_y + y * cell_height + cell_height * 0.2),
+                int(cell_width * 0.6),
+                int(cell_height * 0.6),
+            )
+            pygame.draw.rect(self.screen, GREEN, rect)
+
+        # Draw both snakes.
+        for username, player_data in players_data.items():
+            color = self.parse_color(player_data.get(FIELD_COLOR, "red"))
+            for x, y in player_data.get("positions", []):
+                rect = pygame.Rect(
+                    int(offset_x + x * cell_width),
+                    int(offset_y + y * cell_height),
+                    int(cell_width),
+                    int(cell_height),
+                )
+                pygame.draw.rect(self.screen, color, rect)
 
     def draw_game_over_screen(self):
         self.screen.fill(BLACK)
@@ -286,18 +464,17 @@ class Client:
                                 self.select_opponent(self.players_list[index])
 
                     elif self.current_screen == "snake_config":
-                        if event.key == pygame.K_SPACE:
-                            self.send_snake_config("red")
-                            self.send_ready()
+                        self.handle_control_setup(event)
 
                     elif self.current_screen == "game":
-                        if event.key in (pygame.K_LEFT, pygame.K_a):
+                        # Map the chosen keys to game directions.
+                        if event.key == self.controls.get(LEFT):
                             self.send_move(LEFT)
-                        elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                        elif event.key == self.controls.get(RIGHT):
                             self.send_move(RIGHT)
-                        elif event.key in (pygame.K_UP, pygame.K_w):
+                        elif event.key == self.controls.get(UP):
                             self.send_move(UP)
-                        elif event.key in (pygame.K_DOWN, pygame.K_s):
+                        elif event.key == self.controls.get(DOWN):
                             self.send_move(DOWN)
 
                     elif self.current_screen == "game_over" and event.key == pygame.K_r:
