@@ -378,7 +378,8 @@ def handle_client(client_socket, address):
                 FIELD_STATUS: STATUS_OK,
                 FIELD_USERNAME: username,
             })
-#test
+
+
             print(f"Player {username} joined from {address}")
             broadcast_player_lists()
             handle_messages(client_socket, username)
