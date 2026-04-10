@@ -379,7 +379,6 @@ def handle_client(client_socket, address):
                 FIELD_USERNAME: username,
             })
 
-
             print(f"Player {username} joined from {address}")
             broadcast_player_lists()
             handle_messages(client_socket, username)
