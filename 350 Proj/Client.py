@@ -20,6 +20,7 @@ WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
 
 
 class Client:
@@ -37,6 +38,15 @@ class Client:
         self.game_id = None
         self.input_text = ""
         self.input_active = True
+        self.final_winner = None
+        self.final_scores = {}
+
+        # Status text shown on screens.
+        self.status_message = ""
+
+        # Match request state.
+        self.pending_request_from = None
+        self.pending_request_message = ""
 
         # Default to WASD so the player can start immediately.
         self.controls = {
@@ -68,6 +78,7 @@ class Client:
             return True
         except Exception as e:
             print(f"Failed to connect: {e}")
+            self.status_message = f"Failed to connect: {e}"
             return False
 
     def send_message(self, message):
@@ -79,6 +90,7 @@ class Client:
             self.socket.sendall(json_data.encode("utf-8") + b"\n")
         except Exception as e:
             print(f"Error sending message: {e}")
+            self.status_message = f"Send error: {e}"
 
     def receive_messages(self):
         while self.running:
@@ -88,6 +100,7 @@ class Client:
                     chunk = self.socket.recv(1024)
                     if not chunk:
                         print("Server disconnected")
+                        self.status_message = "Server disconnected"
                         self.running = False
                         return
                     data += chunk
@@ -96,6 +109,7 @@ class Client:
                 self.handle_message(message)
             except Exception as e:
                 print(f"Error receiving message: {e}")
+                self.status_message = f"Receive error: {e}"
                 self.running = False
                 break
 
@@ -105,34 +119,50 @@ class Client:
         if msg_type == JOIN:
             if message.get(FIELD_STATUS) == STATUS_OK:
                 print("Successfully joined server")
+                self.status_message = "Joined successfully"
                 self.current_screen = "lobby"
                 self.input_active = False
             else:
-                print(f"Failed to join: {message.get(FIELD_MESSAGE)}")
+                self.status_message = message.get(FIELD_MESSAGE, "Join failed")
 
         elif msg_type == PLAYER_LIST:
             self.players_list = message.get(FIELD_PLAYERS, [])
             print(f"Available players: {self.players_list}")
+            if self.current_screen == "lobby":
+                self.status_message = "Select an opponent"
 
         elif msg_type == SELECT_OPPONENT:
-            if message.get(FIELD_STATUS) == STATUS_OK:
-                self.opponent = message.get(FIELD_OPPONENT)
-                self.current_screen = "snake_config"
+            status = message.get(FIELD_STATUS)
 
-                # Reset to default WASD at the start of each match.
-                self.controls = {
-                    UP: pygame.K_w,
-                    DOWN: pygame.K_s,
-                    LEFT: pygame.K_a,
-                    RIGHT: pygame.K_d,
-                }
-                self.control_index = 0
-                self.controls_locked = True
-                self.control_mode = "WASD"
+            if status == STATUS_OK:
+                self.status_message = message.get(FIELD_MESSAGE, "Request sent")
+                print(self.status_message)
 
-                print(f"Selected opponent: {self.opponent}")
+            elif status == STATUS_PENDING:
+                self.pending_request_from = message.get(FIELD_OPPONENT)
+                self.pending_request_message = message.get(FIELD_MESSAGE, "")
+                self.current_screen = "match_request"
+                print(self.pending_request_message)
+
             else:
-                print("Failed to select opponent")
+                self.status_message = "Failed to select opponent"
+
+        elif msg_type == MATCH_RESPONSE:
+            status = message.get(FIELD_STATUS)
+
+            if status == STATUS_ACCEPT:
+                self.opponent = message.get(FIELD_OPPONENT)
+                self.status_message = message.get(FIELD_MESSAGE, "Match accepted")
+                self.current_screen = "snake_config"
+                print(self.status_message)
+
+            elif status == STATUS_REJECT:
+                self.pending_request_from = None
+                self.pending_request_message = ""
+                self.opponent = None
+                self.status_message = message.get(FIELD_MESSAGE, "Match rejected")
+                self.current_screen = "lobby"
+                print(self.status_message)
 
         elif msg_type == SNAKE_CONFIG:
             opponent_color = message.get(FIELD_COLOR)
@@ -140,19 +170,32 @@ class Client:
                 self.opponent_color = self.parse_color(opponent_color)
 
         elif msg_type == GAME_STATE:
-            # The server owns the board; the client only stores and draws it.
             self.game_state = message
             self.game_id = message.get(FIELD_GAME_ID)
             self.current_screen = "game"
+            self.status_message = ""
             print("Game state updated")
 
         elif msg_type == GAME_OVER:
+            self.final_winner = message.get(FIELD_WINNER)
+            self.final_scores = message.get(FIELD_SCORE, {})
+            self.game_state = None
+            self.game_id = None
+            self.opponent = None
             self.current_screen = "game_over"
-            winner = message.get(FIELD_WINNER)
-            print(f"Game over! Winner: {winner}")
+            self.status_message = ""
+            print(f"Game over! Winner: {self.final_winner}")
+            print(f"Final scores: {self.final_scores}")
 
         elif msg_type == ERROR:
-            print(f"Server error: {message.get(FIELD_MESSAGE)}")
+            error_message = message.get(FIELD_MESSAGE, "Unknown error")
+            print(f"Server error: {error_message}")
+            self.status_message = error_message
+
+            if error_message == "Username already taken":
+                self.current_screen = "login"
+                self.input_text = ""
+                self.input_active = True
 
     def parse_color(self, color_str):
         color_map = {
@@ -201,9 +244,17 @@ class Client:
         })
 
     def select_opponent(self, opponent_name):
+        self.status_message = f"Request sent to {opponent_name}"
         self.send_message({
             FIELD_TYPE: SELECT_OPPONENT,
             FIELD_OPPONENT: opponent_name,
+        })
+
+    def send_match_response(self, opponent_name, decision):
+        self.send_message({
+            FIELD_TYPE: MATCH_RESPONSE,
+            FIELD_OPPONENT: opponent_name,
+            FIELD_DECISION: decision,
         })
 
     def send_snake_config(self, color):
@@ -238,11 +289,33 @@ class Client:
         elif len(self.input_text) < 20:
             self.input_text += event.unicode
 
+    def handle_match_request_input(self, event):
+        if event.type != pygame.KEYDOWN:
+            return
+
+        if not self.pending_request_from:
+            self.current_screen = "lobby"
+            return
+
+        if event.key == pygame.K_y:
+            self.send_match_response(self.pending_request_from, STATUS_ACCEPT)
+            self.opponent = self.pending_request_from
+            self.pending_request_from = None
+            self.pending_request_message = ""
+            self.status_message = "Match accepted"
+            self.current_screen = "snake_config"
+
+        elif event.key == pygame.K_n:
+            self.send_match_response(self.pending_request_from, STATUS_REJECT)
+            self.pending_request_from = None
+            self.pending_request_message = ""
+            self.status_message = "Match rejected"
+            self.current_screen = "lobby"
+
     def handle_control_setup(self, event):
         if event.type != pygame.KEYDOWN:
             return
 
-        # Let the player switch modes at any time on the setup screen.
         if event.key == pygame.K_1:
             self.set_wasd_controls()
             return
@@ -253,14 +326,12 @@ class Client:
             self.start_custom_controls()
             return
 
-        # Preset modes only need SPACE to confirm.
         if self.control_mode in ("WASD", "ARROWS"):
             if event.key == pygame.K_SPACE:
                 self.send_snake_config("red")
                 self.send_ready()
             return
 
-        # Custom mode collects 4 keys, then SPACE confirms.
         if self.control_mode == "CUSTOM":
             if self.controls_locked:
                 if event.key == pygame.K_SPACE:
@@ -270,7 +341,6 @@ class Client:
 
             current_direction = self.control_order[self.control_index]
 
-            # Avoid duplicate keys for different directions.
             if event.key in self.controls.values():
                 return
 
@@ -279,6 +349,11 @@ class Client:
 
             if self.control_index >= len(self.control_order):
                 self.controls_locked = True
+
+    def draw_status_message(self, y_position):
+        if self.status_message:
+            status_text = self.font.render(self.status_message, True, YELLOW)
+            self.screen.blit(status_text, (50, y_position))
 
     def draw_login_screen(self):
         self.screen.fill(BLACK)
@@ -304,6 +379,8 @@ class Client:
         join_text = self.font.render("Press ENTER to join server", True, GREEN)
         self.screen.blit(join_text, (SCREEN_WIDTH // 2 - 150, 280))
 
+        self.draw_status_message(340)
+
     def draw_lobby_screen(self):
         self.screen.fill(BLACK)
 
@@ -320,6 +397,20 @@ class Client:
         else:
             waiting_text = self.font.render("Waiting for other players...", True, WHITE)
             self.screen.blit(waiting_text, (50, 150))
+
+        self.draw_status_message(500)
+
+    def draw_match_request_screen(self):
+        self.screen.fill(BLACK)
+
+        title_text = self.font.render("Match Request", True, WHITE)
+        self.screen.blit(title_text, (50, 80))
+
+        request_text = self.font.render(self.pending_request_message, True, WHITE)
+        self.screen.blit(request_text, (50, 160))
+
+        decision_text = self.font.render("Press Y to accept or N to reject", True, GREEN)
+        self.screen.blit(decision_text, (50, 240))
 
     def draw_snake_config_screen(self):
         self.screen.fill(BLACK)
@@ -368,7 +459,6 @@ class Client:
         offset_x = 0
         offset_y = top_bar_height
 
-        # Scale the board so it fills almost the whole window.
         cell_width = SCREEN_WIDTH / board["width"]
         cell_height = (SCREEN_HEIGHT - top_bar_height) / board["height"]
 
@@ -392,7 +482,6 @@ class Client:
         spectator_rect = spectator_text.get_rect(topright=(SCREEN_WIDTH - 20, 15))
         self.screen.blit(spectator_text, spectator_rect)
 
-        # Draw the grid.
         for x in range(board["width"]):
             for y in range(board["height"]):
                 rect = pygame.Rect(
@@ -403,7 +492,6 @@ class Client:
                 )
                 pygame.draw.rect(self.screen, WHITE, rect, 1)
 
-        # Draw obstacles.
         for x, y in obstacles:
             rect = pygame.Rect(
                 int(offset_x + x * cell_width),
@@ -413,7 +501,6 @@ class Client:
             )
             pygame.draw.rect(self.screen, WHITE, rect)
 
-        # Draw food.
         for x, y in food:
             rect = pygame.Rect(
                 int(offset_x + x * cell_width + cell_width * 0.2),
@@ -423,7 +510,6 @@ class Client:
             )
             pygame.draw.rect(self.screen, GREEN, rect)
 
-        # Draw both snakes.
         for username, player_data in players_data.items():
             color = self.parse_color(player_data.get(FIELD_COLOR, "red"))
             for x, y in player_data.get("positions", []):
@@ -439,13 +525,20 @@ class Client:
         self.screen.fill(BLACK)
 
         game_over_text = self.font.render("Game Over!", True, RED)
-        self.screen.blit(game_over_text, (SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 - 50))
+        self.screen.blit(game_over_text, (SCREEN_WIDTH // 2 - 100, 140))
 
-        winner_text = self.font.render("Check console for results", True, WHITE)
-        self.screen.blit(winner_text, (SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2))
+        winner_label = self.final_winner if self.final_winner else "Unknown"
+        winner_text = self.font.render(f"Winner: {winner_label}", True, WHITE)
+        self.screen.blit(winner_text, (SCREEN_WIDTH // 2 - 140, 220))
 
-        restart_text = self.font.render("Press R to restart", True, GREEN)
-        self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 + 50))
+        y = 290
+        for username, score in self.final_scores.items():
+            score_text = self.font.render(f"{username}: {score}", True, WHITE)
+            self.screen.blit(score_text, (SCREEN_WIDTH // 2 - 120, y))
+            y += 50
+
+        restart_text = self.font.render("Press R to return to the lobby", True, GREEN)
+        self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - 210, y + 40))
 
     def run(self):
         while self.running:
@@ -453,21 +546,23 @@ class Client:
                 if event.type == pygame.QUIT:
                     self.running = False
 
-                elif self.current_screen == "login" and self.input_active:
-                    self.handle_login_input(event)
-
                 elif event.type == pygame.KEYDOWN:
-                    if self.current_screen == "lobby":
+                    if self.current_screen == "login" and self.input_active:
+                        self.handle_login_input(event)
+
+                    elif self.current_screen == "lobby":
                         if pygame.K_1 <= event.key <= pygame.K_9:
                             index = event.key - pygame.K_1
                             if index < len(self.players_list):
                                 self.select_opponent(self.players_list[index])
 
+                    elif self.current_screen == "match_request":
+                        self.handle_match_request_input(event)
+
                     elif self.current_screen == "snake_config":
                         self.handle_control_setup(event)
 
                     elif self.current_screen == "game":
-                        # Map the chosen keys to game directions.
                         if event.key == self.controls.get(LEFT):
                             self.send_move(LEFT)
                         elif event.key == self.controls.get(RIGHT):
@@ -477,15 +572,23 @@ class Client:
                         elif event.key == self.controls.get(DOWN):
                             self.send_move(DOWN)
 
-                    elif self.current_screen == "game_over" and event.key == pygame.K_r:
-                        self.current_screen = "login"
-                        self.input_text = ""
-                        self.input_active = True
+                    elif self.current_screen == "game_over":
+                        if event.key == pygame.K_r:
+                            self.final_winner = None
+                            self.final_scores = {}
+                            self.game_state = None
+                            self.game_id = None
+                            self.opponent = None
+                            self.current_screen = "lobby"
+                            self.status_message = "Back in lobby"
+                            print("Returned to lobby")
 
             if self.current_screen == "login":
                 self.draw_login_screen()
             elif self.current_screen == "lobby":
                 self.draw_lobby_screen()
+            elif self.current_screen == "match_request":
+                self.draw_match_request_screen()
             elif self.current_screen == "snake_config":
                 self.draw_snake_config_screen()
             elif self.current_screen == "game":

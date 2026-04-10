@@ -79,7 +79,6 @@ def broadcast_player_lists():
 
 
 def random_free_cell(occupied):
-    # Pick a cell that is not already used.
     while True:
         cell = [random.randint(0, BOARD_WIDTH - 1), random.randint(0, BOARD_HEIGHT - 1)]
         if tuple(cell) not in occupied:
@@ -87,8 +86,15 @@ def random_free_cell(occupied):
 
 
 def build_obstacles():
-    # Fixed obstacles keep the layout simple.
-    return [[8, 8], [8, 9], [8, 10], [11, 8], [11, 9], [11, 10]]
+    # Spread obstacles around the board.
+    return [
+        [4, 4], [4, 5], [5, 4],
+        [14, 3], [15, 3], [15, 4],
+        [9, 8],
+        [3, 12], [3, 13], [4, 13],
+        [10, 14], [11, 14], [10, 15],
+        [16, 10], [16, 11], [17, 11],
+    ]
 
 
 def create_food(occupied):
@@ -96,7 +102,6 @@ def create_food(occupied):
 
 
 def build_game_state(player_one, player_two):
-    # Start both snakes on opposite sides.
     snake_one = [[3, 5], [2, 5], [1, 5]]
     snake_two = [[16, 14], [17, 14], [18, 14]]
     obstacles = build_obstacles()
@@ -134,7 +139,6 @@ def build_game_state(player_one, player_two):
 
 
 def serialize_game_state(game):
-    # Convert internal state into one message for clients.
     players_data = {}
     for username in game["players"]:
         players_data[username] = {
@@ -159,7 +163,6 @@ def serialize_game_state(game):
 
 
 def broadcast_game_state(game):
-    # Only send updates to players who are still connected.
     message = serialize_game_state(game)
     for username in game["players"]:
         if username in players:
@@ -177,7 +180,6 @@ def opposite_direction(direction):
 
 def next_head_position(head, direction):
     x, y = head
-
     if direction == UP:
         return [x, y - 1]
     if direction == DOWN:
@@ -188,7 +190,6 @@ def next_head_position(head, direction):
 
 
 def apply_pending_directions(game):
-    # Apply the latest requested direction, unless it reverses instantly.
     for username, direction in list(game["pending_directions"].items()):
         current_direction = game["directions"][username]
         if direction != opposite_direction(current_direction):
@@ -198,7 +199,6 @@ def apply_pending_directions(game):
 
 
 def update_game(game):
-    # First update both directions.
     apply_pending_directions(game)
 
     new_heads = {}
@@ -208,40 +208,37 @@ def update_game(game):
             game["directions"][username],
         )
 
-    losers = []
+    losers = set()
 
-    # Check wall collisions first.
+    # Wall collisions.
     for username, head in new_heads.items():
         x, y = head
         if x < 0 or x >= BOARD_WIDTH or y < 0 or y >= BOARD_HEIGHT:
-            losers.append(username)
+            losers.add(username)
 
-    # Check obstacle collisions.
+    # Obstacle collisions.
     obstacle_cells = {tuple(cell) for cell in game["obstacles"]}
     for username, head in new_heads.items():
-        if tuple(head) in obstacle_cells and username not in losers:
-            losers.append(username)
+        if tuple(head) in obstacle_cells:
+            losers.add(username)
 
-    # Check snake collisions.
+    # Snake collisions.
     for username in game["players"]:
         other = game["players"][1] if game["players"][0] == username else game["players"][0]
-
         own_body = game["snakes"][username][1:]
         other_body = game["snakes"][other]
 
-        if new_heads[username] in own_body and username not in losers:
-            losers.append(username)
+        if new_heads[username] in own_body:
+            losers.add(username)
 
-        if new_heads[username] in other_body and username not in losers:
-            losers.append(username)
+        if new_heads[username] in other_body:
+            losers.add(username)
 
-    # If both heads land on the same cell, both lose health.
+    # Head-to-head collision.
     player1, player2 = game["players"]
     if new_heads[player1] == new_heads[player2]:
-        if player1 not in losers:
-            losers.append(player1)
-        if player2 not in losers:
-            losers.append(player2)
+        losers.add(player1)
+        losers.add(player2)
 
     # Apply collision damage.
     for username in losers:
@@ -250,7 +247,6 @@ def update_game(game):
     food_cells = {tuple(cell) for cell in game["food"]}
 
     for username in game["players"]:
-        # Only move the snake if it did not hit something.
         if username not in losers:
             snake = game["snakes"][username]
             snake.insert(0, new_heads[username])
@@ -272,51 +268,55 @@ def update_game(game):
     else:
         game["food"] = [list(cell) for cell in food_cells]
 
-    # End game if someone dies.
-    dead_players = [u for u in game["players"] if game["health"][u] <= 0]
-    if dead_players:
-        alive_players = [u for u in game["players"] if u not in dead_players]
-        winner = alive_players[0] if alive_players else "Draw"
-        game["running"] = False
-        game["winner"] = winner
-        return
-
-    # End game when the time is over.
+    # End game if the timer runs out.
     if time.time() - game["started_at"] >= MATCH_DURATION_SECONDS:
         player_one, player_two = game["players"]
         health_one = game["health"][player_one]
         health_two = game["health"][player_two]
 
         if health_one > health_two:
-            winner = player_one
+            game["winner"] = player_one
         elif health_two > health_one:
-            winner = player_two
+            game["winner"] = player_two
         else:
-            winner = "Draw"
+            game["winner"] = "Draw"
 
         game["running"] = False
-        game["winner"] = winner
+        return
+
+    # End game if someone reaches zero health.
+    dead_players = [u for u in game["players"] if game["health"][u] <= 0]
+
+    if len(dead_players) == 2:
+        game["winner"] = "Draw"
+        game["running"] = False
+    elif len(dead_players) == 1:
+        alive_player = [u for u in game["players"] if u not in dead_players][0]
+        game["winner"] = alive_player
+        game["running"] = False
 
 
 def game_loop(game_id):
     while True:
         time.sleep(TICK_RATE)
+        should_refresh_lobby = False
 
         with lock:
             game = games.get(game_id)
 
-            if not game or not game["running"]:
+            if not game:
                 return
 
-            # Stop the game if one player disconnected.
-            for username in game["players"]:
-                if username not in players:
-                    game["running"] = False
-                    game["winner"] = "Disconnected"
-                    return
+            if game["running"]:
+                for username in game["players"]:
+                    if username not in players:
+                        game["running"] = False
+                        game["winner"] = "Disconnected"
+                        break
 
-            update_game(game)
-            broadcast_game_state(game)
+            if game["running"]:
+                update_game(game)
+                broadcast_game_state(game)
 
             if not game["running"]:
                 final_scores = {
@@ -338,32 +338,42 @@ def game_loop(game_id):
                         players[username]["status"] = PLAYER_STATUS_ONLINE
                         players[username]["game_id"] = None
                         players[username]["opponent"] = None
+                        players[username]["pending_request_from"] = None
+                        players[username]["requested_opponent"] = None
 
                 if game_id in games:
                     del games[game_id]
 
-                broadcast_player_lists()
-                return
+                should_refresh_lobby = True
+
+        if should_refresh_lobby:
+            broadcast_player_lists()
+            return
 
 
 def handle_client(client_socket, address):
     username = None
     try:
-        message = receive_message(client_socket)
+        while username is None:
+            message = receive_message(client_socket)
+            if not message:
+                return
 
-        if message and message.get(FIELD_TYPE) == JOIN:
-            username = message.get(FIELD_USERNAME)
+            if message.get(FIELD_TYPE) != JOIN:
+                continue
+
+            requested_username = message.get(FIELD_USERNAME)
 
             with lock:
-                if username in players:
+                if requested_username in players:
                     send_message(client_socket, {
                         FIELD_TYPE: ERROR,
                         FIELD_MESSAGE: "Username already taken",
                         FIELD_STATUS: STATUS_FAIL,
                     })
-                    client_socket.close()
-                    return
+                    continue
 
+                username = requested_username
                 players[username] = {
                     "socket": client_socket,
                     "status": PLAYER_STATUS_ONLINE,
@@ -371,35 +381,48 @@ def handle_client(client_socket, address):
                     "snake_config": None,
                     "health": STARTING_HEALTH,
                     "game_id": None,
+                    "pending_request_from": None,
+                    "requested_opponent": None,
                 }
 
-            send_message(client_socket, {
-                FIELD_TYPE: JOIN,
-                FIELD_STATUS: STATUS_OK,
-                FIELD_USERNAME: username,
-            })
+        send_message(client_socket, {
+            FIELD_TYPE: JOIN,
+            FIELD_STATUS: STATUS_OK,
+            FIELD_USERNAME: username,
+        })
 
-            print(f"Player {username} joined from {address}")
-            broadcast_player_lists()
-            handle_messages(client_socket, username)
+        print(f"Player {username} joined from {address}")
+        broadcast_player_lists()
+        handle_messages(client_socket, username)
+
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Error handling client {address}: {e}")
+
 
     finally:
         if username:
             with lock:
                 if username in players:
                     game_id = players[username]["game_id"]
+                    
                     opponent = players[username]["opponent"]
 
-                    # If a player disconnects during a match, end that match.
                     if game_id in games:
                         games[game_id]["running"] = False
                         if opponent in players:
                             games[game_id]["winner"] = opponent
                         else:
                             games[game_id]["winner"] = "Disconnected"
+
+                    # Clear pending requests pointing to this player.
+                    for other_name, info in players.items():
+                        if info.get("pending_request_from") == username:
+                            info["pending_request_from"] = None
+                        if info.get("requested_opponent") == username:
+                            info["requested_opponent"] = None
 
                     players.pop(username, None)
 
@@ -420,6 +443,8 @@ def handle_messages(client_socket, username):
 
             if msg_type == SELECT_OPPONENT:
                 handle_select_opponent(username, message)
+            elif msg_type == MATCH_RESPONSE:
+                handle_match_response(username, message)
             elif msg_type == SNAKE_CONFIG:
                 handle_snake_config(username, message)
             elif msg_type == READY:
@@ -431,8 +456,11 @@ def handle_messages(client_socket, username):
                 break
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"Error receiving message from {username}: {e}")
             break
+
 
 
 def handle_select_opponent(username, message):
@@ -447,20 +475,71 @@ def handle_select_opponent(username, message):
             })
             return
 
-        players[username]["opponent"] = opponent
-        players[opponent]["opponent"] = username
+        players[username]["requested_opponent"] = opponent
+        players[opponent]["pending_request_from"] = username
 
+    # Notify the requester that the request was sent.
     send_message(players[username]["socket"], {
         FIELD_TYPE: SELECT_OPPONENT,
         FIELD_STATUS: STATUS_OK,
         FIELD_OPPONENT: opponent,
+        FIELD_MESSAGE: "Request sent. Waiting for response.",
     })
 
+    # Ask the other player to accept or reject.
     send_message(players[opponent]["socket"], {
         FIELD_TYPE: SELECT_OPPONENT,
-        FIELD_STATUS: STATUS_OK,
+        FIELD_STATUS: STATUS_PENDING,
         FIELD_OPPONENT: username,
+        FIELD_MESSAGE: f"{username} wants to play with you. Accept or reject?",
     })
+
+
+def handle_match_response(username, message):
+    decision = message.get(FIELD_DECISION)
+    requester = message.get(FIELD_OPPONENT)
+
+    with lock:
+        if username not in players or requester not in players:
+            return
+
+        if players[username].get("pending_request_from") != requester:
+            return
+
+        players[username]["pending_request_from"] = None
+        players[requester]["requested_opponent"] = None
+
+        if decision == STATUS_ACCEPT:
+            players[username]["opponent"] = requester
+            players[requester]["opponent"] = username
+
+            send_message(players[requester]["socket"], {
+                FIELD_TYPE: MATCH_RESPONSE,
+                FIELD_STATUS: STATUS_ACCEPT,
+                FIELD_OPPONENT: username,
+                FIELD_MESSAGE: f"{username} accepted your request.",
+            })
+
+            send_message(players[username]["socket"], {
+                FIELD_TYPE: MATCH_RESPONSE,
+                FIELD_STATUS: STATUS_ACCEPT,
+                FIELD_OPPONENT: requester,
+                FIELD_MESSAGE: "You accepted the match request.",
+            })
+        else:
+            send_message(players[requester]["socket"], {
+                FIELD_TYPE: MATCH_RESPONSE,
+                FIELD_STATUS: STATUS_REJECT,
+                FIELD_OPPONENT: username,
+                FIELD_MESSAGE: f"{username} rejected your request.",
+            })
+
+            send_message(players[username]["socket"], {
+                FIELD_TYPE: MATCH_RESPONSE,
+                FIELD_STATUS: STATUS_REJECT,
+                FIELD_OPPONENT: requester,
+                FIELD_MESSAGE: "You rejected the match request.",
+            })
 
 
 def handle_snake_config(username, message):
