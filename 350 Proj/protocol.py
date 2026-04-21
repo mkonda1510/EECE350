@@ -1,6 +1,7 @@
-# Protocols
+# Shared words used by both client and server.
+# Keeping these in one file prevents spelling mistakes in JSON messages.
 
-# Message types
+# Message types.
 JOIN = "JOIN"
 PLAYER_LIST = "PLAYER_LIST"
 SELECT_OPPONENT = "SELECT_OPPONENT"
@@ -13,13 +14,13 @@ READY = "READY"
 DISCONNECT = "DISCONNECT"
 ERROR = "ERROR"
 
-# Directions
+# Snake directions.
 UP = "UP"
 DOWN = "DOWN"
 LEFT = "LEFT"
 RIGHT = "RIGHT"
 
-# Common fields
+# JSON field names.
 FIELD_TYPE = "TYPE"
 FIELD_USERNAME = "USERNAME"
 FIELD_GAME_ID = "GAME_ID"
@@ -41,7 +42,7 @@ FIELD_TIME_LEFT = "TIME_LEFT"
 FIELD_SPECTATORS = "SPECTATORS"
 FIELD_DECISION = "DECISION"
 
-# Status codes
+# General status values.
 STATUS_OK = "OK"
 STATUS_FAIL = "FAIL"
 STATUS_INVALID = "INVALID"
@@ -49,22 +50,9 @@ STATUS_ACCEPT = "ACCEPT"
 STATUS_REJECT = "REJECT"
 STATUS_PENDING = "PENDING"
 
-# Player statuses
+# Server-side player states.
 PLAYER_STATUS_ONLINE = "ONLINE"
 PLAYER_STATUS_OFFLINE = "OFFLINE"
 PLAYER_STATUS_IN_GAME = "IN_GAME"
 PLAYER_STATUS_WAITING = "WAITING"
 PLAYER_STATUS_PENDING = "PENDING"
-
-
-# MESSAGE FORMATS (examples of what each message contains)
-# JOIN: {"TYPE": "JOIN", "USERNAME": "player_name"}
-# PLAYER_LIST: {"TYPE": "PLAYER_LIST", "PLAYERS": ["p1", "p2", ...]}
-# SELECT_OPPONENT: {"TYPE": "SELECT_OPPONENT", "OPPONENT": "player_name"}
-# SNAKE_CONFIG: {"TYPE": "SNAKE_CONFIG", "COLOR": "red", "GAME_ID": "12345"}
-# READY: {"TYPE": "READY", "GAME_ID": "12345"}
-# MOVE: {"TYPE": "MOVE", "GAME_ID": "12345", "DIRECTION": "UP"}
-# GAME_STATE: {"TYPE": "GAME_STATE", "BOARD": [...], "PLAYER1": {"HEALTH": 100, "COLOR": "red"}, "PLAYER2": {"HEALTH": 100, "COLOR": "blue"}}
-# GAME_OVER: {"TYPE": "GAME_OVER", "WINNER": "player_name", "SCORE": {...}}
-# DISCONNECT: {"TYPE": "DISCONNECT", "PLAYER": "player_name"}
-# ERROR: {"TYPE": "ERROR", "MESSAGE": "error description", "STATUS": "FAIL"}
